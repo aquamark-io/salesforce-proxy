@@ -1,6 +1,5 @@
 // index.js
 const express = require('express');
-const multer = require('multer');
 const axios = require('axios');
 const app = express();
 const port = process.env.PORT || 3000;
