@@ -1,4 +1,3 @@
-// index.js
 const express = require('express');
 const axios = require('axios');
 const app = express();
@@ -46,6 +45,7 @@ app.post('/watermark', async (req, res) => {
 app.listen(port, () => {
   console.log(`Salesforce Proxy listening on port ${port}`);
 });
+
 app.post('/batch-watermark', async (req, res) => {
   try {
     const payloads = req.body;
@@ -54,11 +54,11 @@ app.post('/batch-watermark', async (req, res) => {
       return res.status(400).json({ error: 'Payload must be a non-empty array' });
     }
 
-    const axios = require('axios');
     const FormData = require('form-data');
-    const JSZip = require('jszip');
+    const boundary = `----AquamarkBoundary${Date.now()}`;
+    res.setHeader('Content-Type', `multipart/mixed; boundary=${boundary}`);
 
-    const zip = new JSZip();
+    let multipartBody = '';
 
     for (const entry of payloads) {
       const { user_email, file, lender } = entry;
@@ -82,13 +82,17 @@ app.post('/batch-watermark', async (req, res) => {
       });
 
       const filename = `Aquamark - ${lender}.pdf`;
-      zip.file(filename, result.data);
+
+      multipartBody += `--${boundary}\r\n`;
+      multipartBody += `Content-Type: application/pdf\r\n`;
+      multipartBody += `Content-Disposition: attachment; filename="${filename}"\r\n\r\n`;
+      multipartBody += result.data.toString('binary');
+      multipartBody += `\r\n`;
     }
 
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename=aquamark_files.zip');
-    res.send(zipBuffer);
+    multipartBody += `--${boundary}--`;
+
+    res.end(Buffer.from(multipartBody, 'binary'));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Batch processing failed', detail: err.message });
