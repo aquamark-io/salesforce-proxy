@@ -18,13 +18,13 @@ app.post('/watermark', async (req, res) => {
     }
 
     const buffer = Buffer.from(file, 'base64');
-    const finalFileName = filename || 'file.pdf';
+    const originalFileName = filename || 'file.pdf';
 
     const form = new FormData();
     form.append('user_email', user_email);
     form.append('lender', lender || 'Salesforce');
     form.append('file', buffer, {
-      filename: finalFileName,
+      filename: originalFileName,
       contentType: 'application/pdf'
     });
 
@@ -60,13 +60,13 @@ app.post('/batch-watermark', async (req, res) => {
       if (!user_email || !file || !lender) continue;
 
       const buffer = Buffer.from(file, 'base64');
-      const finalFileName = filename || `Aquamark - ${lender}.pdf`;
+      const originalFileName = filename || `Aquamark - ${lender}.pdf`;
 
       const form = new FormData();
       form.append('user_email', user_email);
       form.append('lender', lender);
       form.append('file', buffer, {
-        filename: finalFileName,
+        filename: originalFileName,
         contentType: 'application/pdf'
       });
 
@@ -78,7 +78,8 @@ app.post('/batch-watermark', async (req, res) => {
         responseType: 'arraybuffer'
       });
 
-      zip.file(finalFileName, result.data);
+      // Preserve filename from Apex, regardless of what watermark server returns
+      zip.file(originalFileName, result.data);
     }
 
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
