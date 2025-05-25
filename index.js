@@ -1,64 +1,51 @@
 const express = require('express');
-const multer = require('multer');
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+const cors = require('cors');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 const PORT = process.env.PORT || 3000;
 
-app.post('/watermark', upload.single('file'), async (req, res) => {
-  try {
-    const file = req.file;
-    const lender = req.body.lender;
-    const user_email = req.body.user_email;
-    const filename = req.body.filename;
+app.use(cors());
+app.use(express.json({ limit: '25mb' }));
 
-    if (!file || !lender || !user_email || !filename) {
-      return res.status(400).json({ error: 'Missing required fields' });
+app.post('/return-individuals', async (req, res) => {
+  try {
+    const apiKey = process.env.AQUAMARK_API_KEY;
+    const batchPayload = req.body;
+
+    if (!apiKey || !Array.isArray(batchPayload) || batchPayload.length === 0) {
+      return res.status(400).json({ error: 'Missing API key or invalid payload.' });
     }
 
-    // Prepare payload for decrypt server
-    const payload = [
-      {
-        user_email,
-        lender,
-        file: file.buffer.toString('base64'),
-        filename
-      }
-    ];
-
-    const decryptResponse = await axios.post(
+    // Forward batch to decrypt server
+    const decryptRes = await axios.post(
       'https://aquamark-decrypt.onrender.com/batch-watermark',
-      payload,
+      batchPayload,
       {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.AQUAMARK_API_KEY}`
+          Authorization: `Bearer ${apiKey}`
         },
-        timeout: 30000
+        timeout: 60000
       }
     );
 
-    const result = decryptResponse.data[0];
-    if (!result || !result.base64 || !result.filename) {
-      throw new Error('Invalid response from decrypt server');
+    const results = decryptRes.data;
+
+    if (!Array.isArray(results) || results.length === 0) {
+      return res.status(502).json({ error: 'Decrypt server returned no results.' });
     }
 
-    const pdfBuffer = Buffer.from(result.base64, 'base64');
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
-    res.send(pdfBuffer);
+    // Respond with processed list of { filename, base64 }
+    res.status(200).json(results);
   } catch (err) {
-    console.error('❌ Proxy Error:', err.message);
+    console.error('❌ Proxy batch error:', err.message);
     res.status(500).json({ error: 'Proxy failed: ' + err.message });
   }
 });
 
 app.get('/', (req, res) => {
-  res.send('Aquamark proxy is live.');
+  res.send('Aquamark Salesforce proxy is running.');
 });
 
 app.listen(PORT, () => {
