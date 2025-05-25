@@ -89,10 +89,10 @@ app.post('/watermark', upload.single('file'), async (req, res) => {
 
     const finalPdfBytes = await pdfDoc.save();
 
-    // Preserve original filename + lender
-    const originalName = file.originalname || 'document.pdf';
-    const baseName = path.parse(originalName).name;
-    const finalFileName = `${baseName} - ${lender}.pdf`;
+    // ✅ Use filename from Apex if provided
+    const finalFileName =
+      req.body.filename ||
+      `${file.originalname?.replace('.pdf', '') || 'document'} - ${lender}.pdf`;
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${finalFileName}"`);
