@@ -1,97 +1,116 @@
 const express = require('express');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
-const FormData = require('form-data');
-const JSZip = require('jszip');
+const { PDFDocument, rgb } = require('pdf-lib');
+const { Readable } = require('stream');
+const https = require('https');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const upload = multer({ storage: multer.memoryStorage() });
+const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: '25mb' }));
+const hologramUrl = 'https://aquamark.io/hologram.png';
+const logoBucket = 'https://dvzmnikrvkvgragzhrof.supabase.co/storage/v1/object/public/logos';
 
-// Single watermark route
-app.post('/watermark', async (req, res) => {
+app.post('/watermark', upload.single('file'), async (req, res) => {
   try {
-    const { user_email, file, lender, filename } = req.body;
+    const file = req.file;
+    const lender = req.body.lender || 'lender';
+    const underwriter = req.body.underwriter || 'underwriter';
+    const logoPath = req.body.logoUrl;
 
-    if (!user_email || !file) {
-      return res.status(400).json({ error: 'Missing user_email or file' });
+    if (!file || !logoPath) {
+      return res.status(400).json({ error: 'Missing file or logo URL' });
     }
 
-    const buffer = Buffer.from(file, 'base64');
-    const originalFileName = filename || 'file.pdf';
+    // Decrypt via external Render service if needed
+    let decryptedBuffer = file.buffer;
+    try {
+      const decryptRes = await axios.post('https://aquamark-decrypt.onrender.com/decrypt', file.buffer, {
+        headers: { 'Content-Type': 'application/pdf' },
+        responseType: 'arraybuffer',
+        timeout: 15000,
+      });
+      decryptedBuffer = Buffer.from(decryptRes.data);
+    } catch (err) {
+      console.warn('Decryption skipped or failed:', err.message);
+    }
 
-    const form = new FormData();
-    form.append('user_email', user_email);
-    form.append('lender', lender || 'Salesforce');
-    form.append('file', buffer, {
-      filename: originalFileName,
-      contentType: 'application/pdf'
-    });
+    // Load PDF
+    const pdfDoc = await PDFDocument.load(decryptedBuffer);
+    const logoImg = await axios.get(logoPath, { responseType: 'arraybuffer' });
+    const hologramImg = await axios.get(hologramUrl, { responseType: 'arraybuffer' });
 
-    const apiRes = await axios.post('https://aquamark-decrypt.onrender.com/watermark', form, {
-      headers: {
-        ...form.getHeaders(),
-        Authorization: 'Bearer aqua-api-watermark-10182013040420111015'
-      },
-      responseType: 'arraybuffer'
-    });
+    const logo = await pdfDoc.embedPng(logoImg.data);
+    const hologram = await pdfDoc.embedPng(hologramImg.data);
+
+    const pages = pdfDoc.getPages();
+    for (const page of pages) {
+      const { width, height } = page.getSize();
+
+      const tileSpacing = 150;
+      for (let x = -width; x < width * 2; x += tileSpacing) {
+        for (let y = -height; y < height * 2; y += tileSpacing) {
+          page.drawImage(logo, {
+            x: x,
+            y: y,
+            width: 100,
+            height: 100,
+            rotate: degrees(45),
+            opacity: 0.15,
+          });
+        }
+      }
+
+      page.drawImage(hologram, {
+        x: width - 120,
+        y: 20,
+        width: 100,
+        height: 100,
+        opacity: 0.4,
+      });
+
+      page.drawText(`Underwriter: ${underwriter}`, {
+        x: 20,
+        y: 20,
+        size: 10,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+
+      page.drawText(`Lender: ${lender}`, {
+        x: 20,
+        y: 10,
+        size: 10,
+        color: rgb(0.3, 0.3, 0.3),
+      });
+    }
+
+    const finalPdfBytes = await pdfDoc.save();
+
+    // Preserve original filename + lender
+    const originalName = file.originalname || 'document.pdf';
+    const baseName = path.parse(originalName).name;
+    const finalFileName = `${baseName} - ${lender}.pdf`;
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.send(apiRes.data);
+    res.setHeader('Content-Disposition', `attachment; filename="${finalFileName}"`);
+    res.send(finalPdfBytes);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Something went wrong', detail: err.message });
+    console.error('❌ Error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Batch watermark route
-app.post('/batch-watermark', async (req, res) => {
-  try {
-    const payloads = req.body;
+function degrees(angle) {
+  return (angle * Math.PI) / 180;
+}
 
-    if (!Array.isArray(payloads) || payloads.length === 0) {
-      return res.status(400).json({ error: 'Payload must be a non-empty array' });
-    }
-
-    const zip = new JSZip();
-
-    for (const entry of payloads) {
-      const { user_email, file, lender, filename } = entry;
-      if (!user_email || !file || !lender) continue;
-
-      const buffer = Buffer.from(file, 'base64');
-      const originalFileName = filename || `Aquamark - ${lender}.pdf`;
-
-      const form = new FormData();
-      form.append('user_email', user_email);
-      form.append('lender', lender);
-      form.append('file', buffer, {
-        filename: originalFileName,
-        contentType: 'application/pdf'
-      });
-
-      const result = await axios.post('https://aquamark-decrypt.onrender.com/watermark', form, {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: 'Bearer aqua-api-watermark-10182013040420111015'
-        },
-        responseType: 'arraybuffer'
-      });
-
-      // Preserve filename from Apex, regardless of what watermark server returns
-      zip.file(originalFileName, result.data);
-    }
-
-    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', 'attachment; filename=aquamark_files.zip');
-    res.send(zipBuffer);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Batch processing failed', detail: err.message });
-  }
+app.get('/', (req, res) => {
+  res.send('Aquamark watermarking server is running.');
 });
 
-app.listen(port, () => {
-  console.log(`Salesforce Proxy listening on port ${port}`);
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
 });
