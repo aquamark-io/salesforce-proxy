@@ -1,29 +1,28 @@
-// index.js
 const express = require('express');
 const axios = require('axios');
+const FormData = require('form-data');
+const JSZip = require('jszip');
+
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '25mb' }));
 
+// Single watermark route
 app.post('/watermark', async (req, res) => {
   try {
-    const { user_email, file, lender } = req.body;
+    const { user_email, file, lender, filename } = req.body;
 
     if (!user_email || !file) {
       return res.status(400).json({ error: 'Missing user_email or file' });
     }
 
-    // Convert base64 to binary Buffer
     const buffer = Buffer.from(file, 'base64');
-
-    // Build multipart form
-    const FormData = require('form-data');
     const form = new FormData();
     form.append('user_email', user_email);
     form.append('lender', lender || 'Salesforce');
     form.append('file', buffer, {
-      filename: 'file.pdf',
+      filename: filename || 'file.pdf',
       contentType: 'application/pdf'
     });
 
@@ -43,9 +42,7 @@ app.post('/watermark', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Salesforce Proxy listening on port ${port}`);
-});
+// Batch watermark route
 app.post('/batch-watermark', async (req, res) => {
   try {
     const payloads = req.body;
@@ -54,14 +51,10 @@ app.post('/batch-watermark', async (req, res) => {
       return res.status(400).json({ error: 'Payload must be a non-empty array' });
     }
 
-    const axios = require('axios');
-    const FormData = require('form-data');
-    const JSZip = require('jszip');
-
     const zip = new JSZip();
 
     for (const entry of payloads) {
-      const { user_email, file, lender } = entry;
+      const { user_email, file, lender, filename } = entry;
       if (!user_email || !file || !lender) continue;
 
       const buffer = Buffer.from(file, 'base64');
@@ -69,7 +62,7 @@ app.post('/batch-watermark', async (req, res) => {
       form.append('user_email', user_email);
       form.append('lender', lender);
       form.append('file', buffer, {
-        filename: 'file.pdf',
+        filename: filename || `Aquamark - ${lender}.pdf`,
         contentType: 'application/pdf'
       });
 
@@ -81,11 +74,9 @@ app.post('/batch-watermark', async (req, res) => {
         responseType: 'arraybuffer'
       });
 
-     const filename = req.body.filename || `Aquamark - ${lender}.pdf`;
-form.append('file', buffer, {
-  filename,
-  contentType: 'application/pdf'
-});
+      zip.file(filename || `Aquamark - ${lender}.pdf`, result.data);
+    }
+
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename=aquamark_files.zip');
@@ -94,4 +85,8 @@ form.append('file', buffer, {
     console.error(err);
     res.status(500).json({ error: 'Batch processing failed', detail: err.message });
   }
+});
+
+app.listen(port, () => {
+  console.log(`Salesforce Proxy listening on port ${port}`);
 });
