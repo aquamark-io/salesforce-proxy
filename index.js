@@ -54,28 +54,28 @@ app.post('/batch-watermark', async (req, res) => {
     const zip = new JSZip();
 
     for (const entry of payloads) {
-      const { user_email, file, lender, filename } = entry;
-      if (!user_email || !file || !lender) continue;
+  const { user_email, file, lender, filename } = entry;
+  if (!user_email || !file || !lender) continue;
 
-      const buffer = Buffer.from(file, 'base64');
-      const form = new FormData();
-      form.append('user_email', user_email);
-      form.append('lender', lender);
-      form.append('file', buffer, {
-        filename: filename || `Aquamark - ${lender}.pdf`,
-        contentType: 'application/pdf'
-      });
+  const buffer = Buffer.from(file, 'base64');
+  const form = new FormData();
+  form.append('user_email', user_email);
+  form.append('lender', lender);
+  form.append('file', buffer, {
+    filename: filename || `Aquamark - ${lender}.pdf`,
+    contentType: 'application/pdf'
+  });
 
-      const result = await axios.post('https://aquamark-decrypt.onrender.com/watermark', form, {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: 'Bearer aqua-api-watermark-10182013040420111015'
-        },
-        responseType: 'arraybuffer'
-      });
+  const result = await axios.post('https://aquamark-decrypt.onrender.com/watermark', form, {
+    headers: {
+      ...form.getHeaders(),
+      Authorization: 'Bearer aqua-api-watermark-10182013040420111015'
+    },
+    responseType: 'arraybuffer'
+  });
 
-      zip.file(filename || `Aquamark - ${lender}.pdf`, result.data);
-    }
+  zip.file(filename || `Aquamark - ${lender}.pdf`, result.data);
+}
 
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     res.setHeader('Content-Type', 'application/zip');
