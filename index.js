@@ -81,10 +81,11 @@ app.post('/batch-watermark', async (req, res) => {
         responseType: 'arraybuffer'
       });
 
-      const filename = `Aquamark - ${lender}.pdf`;
-      zip.file(filename, result.data);
-    }
-
+     const filename = req.body.filename || `Aquamark - ${lender}.pdf`;
+form.append('file', buffer, {
+  filename,
+  contentType: 'application/pdf'
+});
     const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename=aquamark_files.zip');
