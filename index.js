@@ -9,45 +9,50 @@ app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 
 app.post('/return-individuals', async (req, res) => {
-  try {
-    const apiKey = process.env.AQUAMARK_API_KEY;
-    const batchPayload = req.body;
+  const apiKey = process.env.AQUAMARK_API_KEY;
+  const payload = req.body;
 
-    if (!apiKey || !Array.isArray(batchPayload) || batchPayload.length === 0) {
-      return res.status(400).json({ error: 'Missing API key or invalid payload.' });
-    }
-
-    // Forward batch to decrypt server
-    const decryptRes = await axios.post(
-      'https://aquamark-decrypt.onrender.com/batch-watermark',
-      batchPayload,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`
-        },
-        timeout: 60000
-      }
-    );
-
-    const results = decryptRes.data;
-
-    if (!Array.isArray(results) || results.length === 0) {
-      return res.status(502).json({ error: 'Decrypt server returned no results.' });
-    }
-
-    // Respond with processed list of { filename, base64 }
-    res.status(200).json(results);
-  } catch (err) {
-    console.error('❌ Proxy batch error:', err.message);
-    res.status(500).json({ error: 'Proxy failed: ' + err.message });
+  if (!apiKey || !Array.isArray(payload) || payload.length === 0) {
+    return res.status(400).json({ error: 'Missing API key or invalid payload.' });
   }
-});
 
-app.get('/', (req, res) => {
-  res.send('Aquamark Salesforce proxy is running.');
+  const results = [];
+
+  for (const fileData of payload) {
+    try {
+      const response = await axios.post(
+        'https://aquamark-decrypt.onrender.com/watermark',
+        new URLSearchParams({
+          user_email: fileData.user_email,
+          lender: fileData.lender
+        }),
+        {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          responseType: 'arraybuffer',
+          data: {
+            file: fileData.file // base64-encoded
+          }
+        }
+      );
+
+      const base64File = Buffer.from(response.data).toString('base64');
+
+      results.push({
+        base64: base64File,
+        filename: fileData.filename || 'Aquamark.pdf'
+      });
+
+    } catch (err) {
+      console.error('❌ Failed to process one file:', fileData.filename, err.message);
+    }
+  }
+
+  res.status(200).json(results);
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Salesforce proxy running on port ${PORT}`);
+  console.log(`✅ Salesforce proxy (individual watermark) running on port ${PORT}`);
 });
