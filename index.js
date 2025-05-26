@@ -21,28 +21,46 @@ app.post('/return-individuals', async (req, res) => {
 
   for (const fileData of payload) {
     try {
-      // ✅ Validate presence of user_email and base64 file
+      if (!fileData.file) {
+        console.error("❌ Missing file data for:", fileData.filename);
+        results.push({
+          error: `No file data for ${fileData.filename}`,
+          filename: fileData.filename
+        });
+        continue;
+      }
+
+      let fileBuffer;
+      try {
+        fileBuffer = Buffer.from(fileData.file, 'base64');
+      } catch (err) {
+        console.error("❌ Failed to decode base64 for:", fileData.filename, err.message);
+        results.push({
+          error: `Base64 decode failed for ${fileData.filename}`,
+          filename: fileData.filename
+        });
+        continue;
+      }
+
       const userEmail = fileData.user_email || '1christinaduncan@gmail.com';
-      const fileBuffer = Buffer.from(fileData.file, 'base64');
+      const lender = fileData.lender || 'N/A';
+
+      console.log("📨 Calling decrypt server with:", {
+        filename: fileData.filename,
+        user_email: userEmail,
+        lender,
+        fileLength: fileBuffer.length
+      });
 
       const form = new FormData();
       form.append('user_email', userEmail);
-      form.append('lender', fileData.lender || 'N/A');
+      form.append('lender', lender);
       form.append('file', fileBuffer, {
         filename: fileData.filename || 'document.pdf',
         contentType: 'application/pdf',
-        knownLength: fileBuffer.length // ✅ Ensures proper form-data encoding
+        knownLength: fileBuffer.length
       });
 
-      // ✅ Log what's being sent
-      console.log("📨 Calling decrypt server with:", {
-        user_email: userEmail,
-        filename: fileData.filename,
-        lender: fileData.lender,
-        size: fileBuffer.length
-      });
-
-      // 🔁 Call the decrypt server
       const response = await axios.post(
         'https://aquamark-decrypt.onrender.com/watermark',
         form,
@@ -55,7 +73,6 @@ app.post('/return-individuals', async (req, res) => {
         }
       );
 
-      // ✅ Return base64 PDF to Apex
       const base64File = Buffer.from(response.data).toString('base64');
 
       results.push({
@@ -64,10 +81,10 @@ app.post('/return-individuals', async (req, res) => {
       });
 
     } catch (err) {
-      console.error('❌ Error processing file:', fileData.filename, err.message);
+      console.error('❌ Error processing file:', fileData.filename, err.response?.data || err.message);
       results.push({
         error: `Failed: ${fileData.filename}`,
-        detail: err.message
+        detail: err.response?.data || err.message
       });
     }
   }
