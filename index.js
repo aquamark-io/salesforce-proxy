@@ -1,12 +1,13 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const FormData = require('form-data');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 app.post('/return-individuals', async (req, res) => {
   const apiKey = process.env.AQUAMARK_API_KEY;
@@ -20,21 +21,23 @@ app.post('/return-individuals', async (req, res) => {
 
   for (const fileData of payload) {
     try {
+      const form = new FormData();
+      form.append('user_email', fileData.user_email);
+      form.append('lender', fileData.lender);
+      form.append('file', Buffer.from(fileData.file, 'base64'), {
+        filename: fileData.filename || 'document.pdf',
+        contentType: 'application/pdf'
+      });
+
       const response = await axios.post(
-        'https://aquamark-decrypt.onrender.com/watermark',
-        new URLSearchParams({
-          user_email: fileData.user_email,
-          lender: fileData.lender
-        }),
+        'https://aquamark-decrypt.onrender.com/watermark', // ✅ CORRECT PATH
+        form,
         {
           headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
+            ...form.getHeaders(),
+            Authorization: `Bearer ${apiKey}`
           },
-          responseType: 'arraybuffer',
-          data: {
-            file: fileData.file // base64-encoded
-          }
+          responseType: 'arraybuffer'
         }
       );
 
@@ -44,15 +47,22 @@ app.post('/return-individuals', async (req, res) => {
         base64: base64File,
         filename: fileData.filename || 'Aquamark.pdf'
       });
-
     } catch (err) {
-      console.error('❌ Failed to process one file:', fileData.filename, err.message);
+      console.error('❌ Error processing file:', fileData.filename, err.message);
+      results.push({
+        error: `Failed: ${fileData.filename}`,
+        detail: err.message
+      });
     }
   }
 
   res.status(200).json(results);
 });
 
+app.get('/', (req, res) => {
+  res.send('✅ Salesforce Proxy is running.');
+});
+
 app.listen(PORT, () => {
-  console.log(`✅ Salesforce proxy (individual watermark) running on port ${PORT}`);
+  console.log(`🔁 Salesforce Proxy listening on port ${PORT}`);
 });
